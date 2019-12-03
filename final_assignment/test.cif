@@ -1,0 +1,58 @@
+
+plant charging_station:
+    controllable c_charging;
+    controllable c_accept_command;
+    disc int[0..100]battery = 0;
+    disc bool message_accepted = false;
+    location l0:
+        initial; marked;
+        edge c_accept_command when battery >= 100 do message_accepted := true;
+        edge c_charging when battery >= 0 or battery < 99  do battery:= battery + 10;
+end
+
+plant driving:
+    controllable c_accelerate;
+    controllable c_rotate90;
+    controllable c_break;
+    controllable c_arrive;
+    disc bool moving = false;
+    disc bool reached = false;
+    location l0:
+        initial; marked;
+        edge c_accelerate do moving := true, reached:= false;
+        edge c_rotate90 goto l0;
+        edge c_break do moving := false;
+        edge c_arrive do moving := false, reached:= true;
+end
+
+plant destination:
+    controllable c_pickup;
+    controllable c_drop;
+    disc bool picked = false;
+    location l0:
+        initial; marked;
+        edge c_pickup do picked := true;
+        edge c_drop   do picked := false;
+end
+
+requirement invariant charging_station.c_accept_command needs charging_station.battery = 100;
+requirement invariant charging_station.message_accepted disables charging_station.c_accept_command;
+
+requirement invariant driving.moving = true disables driving.c_accelerate;
+requirement invariant driving.c_accelerate needs charging_station.battery = 100 and charging_station.message_accepted = true;
+requirement invariant driving.moving = true disables charging_station.c_accept_command;
+requirement invariant driving.c_rotate90 needs driving.moving = false and charging_station.message_accepted = true;
+requirement invariant driving.c_break needs driving.moving = true;
+
+requirement invariant destination.c_pickup needs driving.reached = true;
+requirement invariant driving.c_arrive needs driving.moving = true;
+
+requirement invariant driving.reached = true and destination.picked = false disables driving.c_accelerate;
+requirement invariant driving.reached = true and destination.picked = false disables driving.c_rotate90;
+requirement invariant driving.reached = true and destination.picked = false disables driving.c_break;
+
+requirement invariant driving.moving = true disables destination.c_pickup;
+requirement invariant destination.picked = true disables destination.c_pickup;
+requirement invariant destination.c_drop needs destination.picked = true and driving.reached = true;
+
+
