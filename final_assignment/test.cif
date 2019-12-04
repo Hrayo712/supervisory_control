@@ -2,44 +2,44 @@
 /* Charging Station Automaton */
 
 plant charging_station:
-    controllable c_charging;
-    controllable c_accept_command;
-    disc int[0..100]battery = 0;
+    uncontrollable u_full_battery;
+    controllable c_accept_pickup_request;
+    disc bool battery_full = false;
     disc bool message_accepted = false;
     location l0:
         initial; marked;
-        edge c_accept_command when battery >= 100 do message_accepted := true;
-        edge c_charging when battery >= 0 or battery < 99  do battery:= battery + 10;
+        edge c_accept_pickup_request when battery_full = true do message_accepted := true;
+        edge u_full_battery do battery_full:= true;
 end
 
 /* Driving state Automaton */
 
 plant driving:
-    controllable c_accelerate;
+    controllable c_move;
     controllable c_rotate90;
-    controllable c_break;
-    controllable c_arrive;
+    controllable c_stop;
+    uncontrollable u_arrive_to_order; //It is assumed that this signal implies a handshake between the pickup request and camera information (or other sensor data) to match the package that the robot should pick
     disc bool moving = false;
-    disc bool reached = false;
+    disc bool reached = false; //reached storage location or pickup location
     location l0:
         initial; marked;
-        edge c_accelerate do moving := true, reached:= false;
+        edge c_move do moving := true, reached:= false;
         edge c_rotate90 goto l0;
-        edge c_break do moving := false;
-        edge c_arrive do moving := false, reached:= true;
+        edge c_stop do moving := false;
+        edge u_arrive_to_order do moving := false, reached:= true;
 end
 
 /* Destination Automaton. Note: This Automaton reflects both the storage and pickup location. */
-/* The c_pickup and c_drop edges are used to represent this two situations.                   */
+/* The c_get_pickup_request and c_drop_at_pickup edges are used to represent this two situations.                   */
 
 plant destination:
-    controllable c_pickup;
-    controllable c_drop;
+    controllable c_get_pickup_request;  //pickup at storage to take to pickup location
+    controllable c_drop_at_pickup;
     disc bool picked = false;
     location l0:
         initial; marked;
-        edge c_pickup do picked := true;
-        edge c_drop   do picked := false;
+        edge c_get_pickup_request do picked := true;
+        edge c_drop_at_pickup   do picked := false;
 end
 
 // @HIRAM: This is only a baseline and several changes are necessary, such as, verifying every single requirement and
@@ -50,25 +50,25 @@ end
 /* Note: It is also possible to express requirements via requirement Automaton(s) to be defined.        */
 
 /* REQUIREMENT 1 */
-/* INFORMSL STATEMENT: In order to accept a command (within the charging station), battery shall be a 100% */
+/* INFORMSL STATEMENT: In order to accept a command (within the charging station), battery shall be full */
 
-requirement invariant charging_station.c_accept_command needs charging_station.battery = 100;
+requirement invariant charging_station.c_accept_pickup_request needs charging_station.battery_full = true;
 
 /* REQUIREMENT 2 */
 /* INFORMAL STATEMENT: When a command message issuing a pickup request has been accepted, no other pickup request can be accepted until the current one is complete */
-requirement invariant charging_station.message_accepted disables charging_station.c_accept_command;
+requirement invariant charging_station.message_accepted disables charging_station.c_accept_pickup_request;
 
 /* REQUIREMENT 3 */
 /* INFORMAL STATEMENT: In order to move, robot shall have full battery and a pickup request command accepted*/
-requirement invariant driving.c_accelerate needs charging_station.battery = 100 and charging_station.message_accepted = true;
+requirement invariant driving.c_move needs charging_station.battery_full = true and charging_station.message_accepted = true;
 
 /* REQUIREMENT 4 */
 /* INFORMAL STATEMENT (non-functional): When the robot is on the move, no further "move" commands shall be issued  */
-requirement invariant driving.moving = true disables driving.c_accelerate;
+requirement invariant driving.moving = true disables driving.c_move;
 
 /* REQUIREMENT 5 */
 /* INFORMAL STATEMENT: When the robot is driving, no pickup request command shall be processed*/
-requirement invariant driving.moving = true disables charging_station.c_accept_command;
+requirement invariant driving.moving = true disables charging_station.c_accept_pickup_request;
 
 /* REQUIREMENT 6 */
 /* INFORMAL STATEMENT: To prevent collisions and hardware integrity, a 90 degree rotation shall only be performed when the robot is not moving and a pickup request is in place.*/
@@ -76,29 +76,26 @@ requirement invariant driving.c_rotate90 needs driving.moving = false and chargi
 
 /* REQUIREMENT 7 */
 /* INFORMAL STATEMENT (non-functional): In order to break, the robot shall be moving.*/
-requirement invariant driving.c_break needs driving.moving = true;
+requirement invariant driving.c_stop needs driving.moving = true;
 
 /* REQUIREMENT 8 */
 /* INFORMAL STATEMENT: In order to pickup an order (rack), the robot must have reached its destination. */
-requirement invariant destination.c_pickup needs driving.reached = true;
-
-/* PENDING ( Uncontrollable generates empty supervisor */
-requirement invariant driving.c_arrive needs driving.moving = true;
+requirement invariant destination.c_get_pickup_request needs driving.reached = true;
 
 /* REQUIREMENT 9 */
 /* INFORMAL STATEMENT: Upon reaching a storage location, the robot has to pickup the order before proceeding to delivery */
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_accelerate;
+requirement invariant driving.reached = true and destination.picked = false disables driving.c_move;
 requirement invariant driving.reached = true and destination.picked = false disables driving.c_rotate90;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_break;
+requirement invariant driving.reached = true and destination.picked = false disables driving.c_stop;
 
 /* REQUIREMENT 10 */
 /* INFORMAL STATEMENT (non-functional): A robot cannot pickup an order while moving   */
-requirement invariant driving.moving = true disables destination.c_pickup;
+requirement invariant driving.moving = true disables destination.c_get_pickup_request;
 
 /* REQUIREMENT 11 */
 /* INFORMAL STATEMENT (non-functional): A robot cannot pickup an order while moving   */
-requirement invariant destination.picked = true disables destination.c_pickup;
+requirement invariant destination.picked = true disables destination.c_get_pickup_request;
 
 /* REQUIREMENT 12 */
 /* INFORMAL STATEMENT (non-functional): To drop a package, the drone shall have reached its destination and cargo shall have been picked up first. */
-requirement invariant destination.c_drop needs destination.picked = true and driving.reached = true;
+requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.reached = true;
