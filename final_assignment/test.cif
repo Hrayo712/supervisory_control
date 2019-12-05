@@ -5,20 +5,32 @@
   @Sukrut(05_12_2019): Added the requirement numbers from the original text (Page 3) to keep track of the requirements,
   I have also divided the requirements based on intention as mentioned in the text. I have kept all the informal statements written by @Hiram,
   they relate to requirement statements in the same order. A PDF of the original text is shared where I have marked already implemented requirements.
-  Please refer and update both the files! (Reference: Page 3 of "warehouserobotsproject.pdf")                 */
+  Please refer and update both the files! (Reference: Page 3 of "warehouserobotsproject.pdf")
+
+  @Sukrut(05_12_2019): Added Critical/ empty states for the battery  and Added variable Charging in "plant charging_station" - Requirement L5  */
 
 
 /* Charging Station Automaton */
 
 plant charging_station:
     uncontrollable u_full_battery;
+    uncontrollable u_critical_battery; /* Assumption low battery, empty battery is the same*/
+    uncontrollable u_charging;
     controllable c_accept_pickup_request;
+    controllable c_request_human_assistance;
     disc bool battery_full = false;
     disc bool message_accepted = false;
+    disc bool low_bat_warning=false;
+    disc bool battery_critical=false;
+    disc bool take_to_charging_station=false;
+    disc bool charging=false;
     location l0:
         initial; marked;
         edge c_accept_pickup_request when battery_full = true do message_accepted := true;
-        edge u_full_battery do battery_full:= true;
+        edge c_request_human_assistance when battery_critical = true do low_bat_warning:=true;
+        edge u_full_battery do battery_full:= true, charging:= false;
+        edge u_critical_battery do battery_critical:=true;
+        edge u_charging when take_to_charging_station=true do charging:=true;
 end
 
 /* Driving state Automaton */
@@ -135,5 +147,15 @@ requirement invariant destination.picked = true disables destination.c_get_picku
 requirement invariant destination.c_get_pickup_request needs driving.reached = true and destination.collision = false;
 requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.reached = true;
 
+/* L5 REQUIREMENT: A battery location may only be requested when the battery is low.  */
+/* INFORMAL STATEMENT: When a command message low battery is accepted, disables new pickup requests */
+/* INFORMAL STATEMENT: When a command message low battery is accepted, disables moving */
+/* INFORMAL STATEMENT: During human intervention, do not move */
+/* INFORMAL STATEMENT: Human puts to charge */
 
+requirement invariant charging_station.low_bat_warning = true disables charging_station.c_accept_pickup_request;
+requirement invariant charging_station.low_bat_warning = true disables driving.c_move;
+requirement invariant charging_station.low_bat_warning = true disables charging_station.c_request_human_assistance;
+requirement invariant charging_station.c_request_human_assistance needs driving.moving = false;
+requirement invariant charging_station.take_to_charging_station=true disables charging_station.c_request_human_assistance;
 
