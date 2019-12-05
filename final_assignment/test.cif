@@ -44,11 +44,18 @@ end
 plant destination:
     controllable c_get_pickup_request;  //pickup at storage to take to pickup location
     controllable c_drop_at_pickup;
+    uncontrollable u_rack_collision;
+    uncontrollable u_rack_no_collision;
+
+    disc bool collision = false;
     disc bool picked = false;
     location l0:
         initial; marked;
         edge c_get_pickup_request do picked := true;
         edge c_drop_at_pickup   do picked := false;
+        edge u_rack_collision do collision := true;
+        edge u_rack_no_collision do collision := false;
+
 end
 
 
@@ -81,6 +88,10 @@ requirement invariant driving.reached = true and destination.picked = false disa
 /*@Sukrut: Current statement does not completely cover the requirement M3 */
 /* INFORMAL STATEMENT (non-functional): In order to break, the robot shall be moving.*/
 requirement invariant driving.c_stop needs driving.moving = true;
+
+/* M4 REQUIREMENT: If a product rack is lifted, it may not collide with other product racks.  */
+/* INFORMAL STATEMENT (non-functional): when lifted, control system avoids collision with other racks.*/
+
 
 /* M7 REQUIREMENT: After the battery is being recharged, the vehicle may only start moving again when the battery is fully charged.  */
 /* INFORMSL STATEMENT: In order to accept a command (within the charging station), battery shall be full */
@@ -121,7 +132,7 @@ requirement invariant driving.moving = true disables charging_station.c_accept_p
 requirement invariant driving.moving = true disables driving.c_move;
 requirement invariant driving.moving = true disables destination.c_get_pickup_request;
 requirement invariant destination.picked = true disables destination.c_get_pickup_request;
-requirement invariant destination.c_get_pickup_request needs driving.reached = true;
+requirement invariant destination.c_get_pickup_request needs driving.reached = true and destination.collision = false;
 requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.reached = true;
 
 

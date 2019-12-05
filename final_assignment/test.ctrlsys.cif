@@ -1,63 +1,67 @@
 plant automaton charging_station:
-  controllable c_charging;
-  controllable c_accept_command;
-  disc int[0..100] battery = 0;
+  uncontrollable u_full_battery;
+  controllable c_accept_pickup_request;
+  disc bool battery_full = false;
   disc bool message_accepted = false;
   location l0:
     initial;
     marked;
-    edge c_accept_command when battery >= 100 do message_accepted := true;
-    edge c_charging when battery >= 0 or battery < 99 do battery := battery + 10;
+    edge c_accept_pickup_request when battery_full = true do message_accepted := true;
+    edge u_full_battery do battery_full := true;
 end
 plant automaton driving:
-  controllable c_accelerate;
+  controllable c_move;
   controllable c_rotate90;
-  controllable c_break;
-  uncontrollable u_arrive;
+  controllable c_stop;
+  uncontrollable u_arrive_to_order;
   disc bool moving = false;
   disc bool reached = false;
   location l0:
     initial;
     marked;
-    edge c_accelerate do moving := true, reached := false;
+    edge c_move do moving := true, reached := false;
     edge c_rotate90 goto l0;
-    edge c_break do moving := false;
-    edge u_arrive do moving := false, reached := true;
+    edge c_stop do moving := false;
+    edge u_arrive_to_order do moving := false, reached := true;
 end
 plant automaton destination:
-  controllable c_pickup;
-  controllable c_drop;
+  controllable c_get_pickup_request;
+  controllable c_drop_at_pickup;
+  uncontrollable u_rack_collision;
+  uncontrollable u_rack_no_collision;
+  disc bool collision = false;
   disc bool picked = false;
   location l0:
     initial;
     marked;
-    edge c_pickup do picked := true;
-    edge c_drop do picked := false;
+    edge c_get_pickup_request do picked := true;
+    edge c_drop_at_pickup do picked := false;
+    edge u_rack_collision do collision := true;
+    edge u_rack_no_collision do collision := false;
 end
 supervisor automaton sup:
-  alphabet charging_station.c_accept_command, charging_station.c_charging, driving.c_accelerate, driving.c_rotate90, driving.c_break, destination.c_pickup, destination.c_drop;
+  alphabet charging_station.c_accept_pickup_request, driving.c_move, driving.c_rotate90, driving.c_stop, destination.c_get_pickup_request, destination.c_drop_at_pickup;
   location:
     initial;
     marked;
-    edge charging_station.c_accept_command when true;
-    edge charging_station.c_charging when not(charging_station.battery = 96 or charging_station.battery = 98) and (charging_station.battery != 100 and not(charging_station.battery = 92 or charging_station.battery = 94)) and (charging_station.battery != 97 and charging_station.battery != 93 and (charging_station.battery != 99 and not(charging_station.battery = 91 or charging_station.battery = 95)));
-    edge destination.c_drop when true;
-    edge destination.c_pickup when true;
-    edge driving.c_accelerate when true;
-    edge driving.c_break when true;
+    edge charging_station.c_accept_pickup_request when true;
+    edge destination.c_drop_at_pickup when true;
+    edge destination.c_get_pickup_request when true;
+    edge driving.c_move when true;
     edge driving.c_rotate90 when true;
+    edge driving.c_stop when true;
 end
-requirement invariant charging_station.c_accept_command needs charging_station.battery = 100;
-requirement invariant charging_station.message_accepted disables charging_station.c_accept_command;
-requirement invariant driving.moving = true disables driving.c_accelerate;
-requirement invariant driving.c_accelerate needs charging_station.battery = 100 and charging_station.message_accepted = true;
-requirement invariant driving.moving = true disables charging_station.c_accept_command;
 requirement invariant driving.c_rotate90 needs driving.moving = false and charging_station.message_accepted = true;
-requirement invariant driving.c_break needs driving.moving = true;
-requirement invariant destination.c_pickup needs driving.reached = true;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_accelerate;
+requirement invariant driving.reached = true and destination.picked = false disables driving.c_move;
 requirement invariant driving.reached = true and destination.picked = false disables driving.c_rotate90;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_break;
-requirement invariant driving.moving = true disables destination.c_pickup;
-requirement invariant destination.picked = true disables destination.c_pickup;
-requirement invariant destination.c_drop needs destination.picked = true and driving.reached = true;
+requirement invariant driving.reached = true and destination.picked = false disables driving.c_stop;
+requirement invariant driving.c_stop needs driving.moving = true;
+requirement invariant charging_station.c_accept_pickup_request needs charging_station.battery_full = true;
+requirement invariant driving.c_move needs charging_station.battery_full = true and charging_station.message_accepted = true;
+requirement invariant charging_station.message_accepted disables charging_station.c_accept_pickup_request;
+requirement invariant driving.moving = true disables charging_station.c_accept_pickup_request;
+requirement invariant driving.moving = true disables driving.c_move;
+requirement invariant driving.moving = true disables destination.c_get_pickup_request;
+requirement invariant destination.picked = true disables destination.c_get_pickup_request;
+requirement invariant destination.c_get_pickup_request needs driving.reached = true and destination.collision = false;
+requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.reached = true;
