@@ -1,29 +1,43 @@
 plant automaton charging_station:
   uncontrollable u_full_battery;
-  uncontrollable u_critical_battery;
+  uncontrollable u_empty_battery;
   uncontrollable u_charging;
-  controllable c_accept_pickup_request;
+  uncontrollable u_low_battery;
   controllable c_request_human_assistance;
   disc bool battery_full = false;
-  disc bool message_accepted = false;
   disc bool low_bat_warning = false;
-  disc bool battery_critical = false;
+  disc bool battery_empty = false;
   disc bool take_to_charging_station = false;
   disc bool charging = false;
+  disc bool low_battery = false;
   location l0:
     initial;
     marked;
-    edge c_accept_pickup_request when battery_full = true do message_accepted := true;
-    edge c_request_human_assistance when battery_critical = true do low_bat_warning := true;
-    edge u_full_battery do battery_full := true, charging := false, battery_critical := false;
-    edge u_critical_battery do battery_critical := true;
-    edge u_charging when take_to_charging_station = true do charging := true, battery_critical := false;
+    edge c_request_human_assistance when battery_empty = true do low_bat_warning := true;
+    edge u_full_battery do battery_full := true, charging := false, battery_empty := false;
+    edge u_empty_battery when low_battery = false do battery_empty := true;
+    edge u_charging when take_to_charging_station = true do charging := true, battery_empty := false;
+    edge u_low_battery when battery_empty = false do low_battery := true;
+end
+plant automaton idle:
+  controllable c_accept_pickup_request;
+  controllable c_complete_request;
+  uncontrollable u_message_request;
+  disc bool message_accepted = false;
+  disc bool message_pending = false;
+  location l0:
+    initial;
+    marked;
+    edge u_message_request do message_pending := true;
+    edge c_accept_pickup_request when message_pending = true do message_accepted := true, message_pending := false;
+    edge c_complete_request when message_accepted = true do message_accepted := false;
 end
 plant automaton driving:
   controllable c_move;
   controllable c_rotate;
   controllable c_stop;
-  uncontrollable u_arrive_to_order;
+  controllable c_goto_charge;
+  uncontrollable u_arrive_to_destination;
   disc bool moving = false;
   disc bool reached = false;
   location l0:
@@ -32,7 +46,8 @@ plant automaton driving:
     edge c_move do moving := true, reached := false;
     edge c_rotate goto l0;
     edge c_stop do moving := false;
-    edge u_arrive_to_order do moving := false, reached := true;
+    edge u_arrive_to_destination do moving := false, reached := true;
+    edge c_goto_charge do moving := true;
 end
 plant automaton destination:
   controllable c_get_pickup_request;
@@ -44,6 +59,7 @@ plant automaton destination:
   uncontrollable u_rack_no_collision;
   disc bool validate_pickup = false;
   disc bool validate_drop = false;
+  disc bool dropped = false;
   disc bool destination_flag = false;
   disc bool collision = false;
   disc bool picked = false;
@@ -51,51 +67,56 @@ plant automaton destination:
     initial;
     marked;
     edge c_get_pickup_request do picked := true, destination_flag := false, validate_pickup := false;
-    edge c_drop_at_pickup do picked := false, validate_drop := false;
+    edge c_drop_at_pickup do picked := false, validate_drop := false, dropped := true;
     edge c_validate_pickup do validate_pickup := true;
-    edge c_validate_drop do validate_drop := true;
+    edge c_validate_drop do validate_drop := true, dropped := false;
     edge u_rack_collision do collision := true;
     edge u_rack_no_collision do collision := false;
     edge u_confirmation when validate_pickup = true or validate_drop = true do destination_flag := true;
 end
 supervisor automaton sup:
-  alphabet charging_station.c_accept_pickup_request, charging_station.c_request_human_assistance, driving.c_move, driving.c_rotate, driving.c_stop, destination.c_get_pickup_request, destination.c_drop_at_pickup, destination.c_validate_pickup, destination.c_validate_drop;
+  alphabet charging_station.c_request_human_assistance, idle.c_accept_pickup_request, idle.c_complete_request, driving.c_move, driving.c_rotate, driving.c_stop, driving.c_goto_charge, destination.c_get_pickup_request, destination.c_drop_at_pickup, destination.c_validate_pickup, destination.c_validate_drop;
   location:
     initial;
     marked;
-    edge charging_station.c_accept_pickup_request when true;
     edge charging_station.c_request_human_assistance when true;
     edge destination.c_drop_at_pickup when true;
     edge destination.c_get_pickup_request when true;
     edge destination.c_validate_drop when true;
     edge destination.c_validate_pickup when true;
+    edge driving.c_goto_charge when true;
     edge driving.c_move when true;
     edge driving.c_rotate when true;
     edge driving.c_stop when true;
+    edge idle.c_accept_pickup_request when true;
+    edge idle.c_complete_request when true;
 end
-requirement invariant driving.c_rotate needs driving.moving = false and charging_station.message_accepted = true;
+requirement invariant driving.c_rotate needs driving.moving = false and idle.message_accepted = true;
 requirement invariant driving.reached = true and destination.picked = false disables driving.c_move;
 requirement invariant driving.reached = true and destination.picked = false disables driving.c_rotate;
 requirement invariant driving.reached = true and destination.picked = false disables driving.c_stop;
 requirement invariant driving.c_stop needs driving.moving = true;
-requirement invariant destination.c_get_pickup_request needs destination.destination_flag = true;
+requirement invariant destination.c_get_pickup_request needs destination.destination_flag = true and destination.picked = false and destination.dropped = false;
 requirement invariant destination.c_validate_pickup needs driving.reached = true;
 requirement invariant destination.destination_flag = true disables destination.c_validate_pickup;
 requirement invariant destination.picked = true disables destination.c_validate_pickup;
 requirement invariant destination.destination_flag = true disables destination.c_validate_drop;
 requirement invariant destination.c_validate_drop needs driving.reached = true and destination.picked = true;
 requirement invariant destination.c_drop_at_pickup needs driving.reached = true and destination.picked = true and destination.destination_flag = true;
-requirement invariant charging_station.c_accept_pickup_request needs charging_station.battery_full = true;
-requirement invariant driving.c_move needs charging_station.battery_full = true and charging_station.message_accepted = true;
-requirement invariant charging_station.message_accepted disables charging_station.c_accept_pickup_request;
-requirement invariant driving.moving = true disables charging_station.c_accept_pickup_request;
+requirement invariant idle.c_accept_pickup_request needs charging_station.battery_full = true;
+requirement invariant driving.c_move needs charging_station.battery_full = true and idle.message_accepted = true;
+requirement invariant idle.c_accept_pickup_request needs charging_station.low_battery = false;
+requirement invariant driving.c_goto_charge needs charging_station.low_battery = true and driving.moving = false;
+requirement invariant idle.message_accepted disables idle.c_accept_pickup_request;
+requirement invariant driving.moving = true disables idle.c_accept_pickup_request;
 requirement invariant driving.moving = true disables driving.c_move;
 requirement invariant driving.moving = true disables destination.c_get_pickup_request;
 requirement invariant destination.picked = true disables destination.c_get_pickup_request;
 requirement invariant destination.c_get_pickup_request needs driving.reached = true and destination.collision = false;
 requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.reached = true;
-requirement invariant charging_station.low_bat_warning = true disables charging_station.c_accept_pickup_request;
+requirement invariant charging_station.low_bat_warning = true disables idle.c_accept_pickup_request;
 requirement invariant charging_station.low_bat_warning = true disables driving.c_move;
 requirement invariant charging_station.low_bat_warning = true disables charging_station.c_request_human_assistance;
 requirement invariant charging_station.c_request_human_assistance needs driving.moving = false;
 requirement invariant charging_station.take_to_charging_station = true disables charging_station.c_request_human_assistance;
+requirement invariant idle.c_complete_request needs destination.dropped = true;
