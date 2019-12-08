@@ -7,65 +7,86 @@
   they relate to requirement statements in the same order. A PDF of the original text is shared where I have marked already implemented requirements.
   Please refer and update both the files! (Reference: Page 3 of "warehouserobotsproject.pdf")
 
-  @Sukrut(05_12_2019): Added Critical/ empty states for the battery  and Added variable Charging in "plant charging_station" - Requirement L5  */
+  @Sukrut(05_12_2019): Added Critical/ empty states for the battery  and Added variable Charging in "plant charging_station" - Requirement L5
 
+  @HIRAM (12_12_2019) : Completed the uncontrollable "charging" model. Modified the Driving and destination plant to better reflect the uncontrollable plant.
+             Made modifications to support M4/M5/L5 requirements. */
 
 /* Charging Station Automaton */
 
-plant charging_station:
+plant charging:
     uncontrollable u_full_battery;
-    uncontrollable u_empty_battery; /* Assumption low battery, empty battery is the same*/
+    uncontrollable u_empty_battery;
     uncontrollable u_charging;
     uncontrollable u_low_battery;
-    controllable c_request_human_assistance;
-    disc bool battery_full = false;
-    disc bool low_bat_warning=false;
-    disc bool battery_empty=false;
-    disc bool take_to_charging_station=false;
+
+    disc bool battery_full = true;
+    disc bool critical_battery=false;
     disc bool charging = false;
     disc bool low_battery = false;
+
     location l0:
         initial; marked;
-        edge c_request_human_assistance when battery_empty = true do low_bat_warning:=true;
-        edge u_full_battery do battery_full:= true, charging:= false, battery_empty:=false, low_battery := false;
-        edge u_empty_battery when low_battery = false do battery_empty:= true, battery_full := false;
-        edge u_charging when take_to_charging_station=true do charging:=true, battery_empty:= false;
-        edge u_low_battery when battery_empty = false do low_battery := true, battery_full := false;
+        edge u_full_battery   when (battery_full = false and (low_battery = true and charging = true))   do battery_full:= true, charging:= false, critical_battery:=false, low_battery := false;
+        edge u_low_battery    when ((low_battery = false and battery_full = true) or (charging = true and critical_battery = true )) do low_battery := true, battery_full := false, critical_battery:=false;
+        edge u_empty_battery  when (critical_battery = false and low_battery = true and charging = false) do critical_battery:= true, low_battery := false;
+        edge u_charging       when ((charging = false) and (low_battery = true or critical_battery = true))                             do charging:=true ;
 end
 
 plant idle:
-    controllable c_accept_pickup_request;
     controllable c_complete_request;
+    controllable c_accept_msg_request;
+    controllable c_request_human_assistance;
+
     uncontrollable u_message_request;
 
+    disc bool request_assistance=false;
     disc bool message_accepted = false;
     disc bool message_pending = false;
 
     location l0:
         initial; marked;
-        edge u_message_request do message_pending := true;
-        edge c_accept_pickup_request when message_pending = true do message_accepted := true, message_pending:= false;
-        edge c_complete_request when message_accepted = true do message_accepted := false;
+        edge u_message_request                                      do message_pending := true;
+        edge c_request_human_assistance                             do request_assistance:=true;
+        edge c_accept_msg_request     when message_pending  = true  do message_accepted := true, message_pending:= false,request_assistance:=false;
+        edge c_complete_request       when message_accepted = true  do message_accepted := false;
 
 end
 
 /* Driving state Automaton */
+enum Location = STORAGE, PICKUP, CHARGING, READY;
 
 plant driving:
     controllable c_move;
     controllable c_rotate; // Rotate is assumed to be 90 degrees. HW  limitation.
     controllable c_stop;
     controllable c_goto_charge;
-    uncontrollable u_arrive_to_destination; //It is assumed that this signal implies a handshake between the pickup request and camera information (or other sensor data) to match the package that the robot should pick
+    controllable c_ready;
+
+    uncontrollable u_no_collision;
+    uncontrollable u_collision_detected;
+
+    uncontrollable u_arrive_to_storage;//It is assumed that this signal implies a handshake between the pickup request and camera information (or other sensor data) to match the package that the robot should pick
+    uncontrollable u_arrive_to_pickup;
+    uncontrollable u_arrive_to_charge;
+
+    disc bool collision = false;
     disc bool moving = false;
-    disc bool reached = false; //reached storage location or pickup location
+    disc Location loc = READY;
+    disc bool goto_charge_req = false;
     location l0:
+
         initial; marked;
-        edge c_move do moving := true, reached:= false;
-        edge c_rotate goto l0;
-        edge c_stop do moving := false;
-        edge u_arrive_to_destination do moving := false, reached:= true;
-        edge c_goto_charge do moving := true;
+        edge c_rotate               goto l0;
+        edge c_ready                when (charging.battery_full = true and loc = CHARGING) do loc := READY;
+        edge c_move                 do moving := true;
+        edge c_stop                 do moving := false;
+        edge c_goto_charge          do moving := true, goto_charge_req := true;
+        edge u_collision_detected   when collision = false  do collision :=true, moving:=false;
+        edge u_no_collision         when collision = true   do collision:= false;
+        edge u_arrive_to_storage    when idle.message_accepted = true and moving = true and destination.picked = false do moving := false, loc:= STORAGE;
+        edge u_arrive_to_pickup     when idle.message_accepted = true and moving = true and destination.picked = true  do moving := false, loc:= PICKUP;
+        edge u_arrive_to_charge     when idle.message_accepted = false and goto_charge_req = true do moving := false, loc:= CHARGING, goto_charge_req := false;
 end
 
 
@@ -86,104 +107,107 @@ plant destination:
     disc bool validate_pickup = false;
     disc bool validate_drop = false;
     disc bool dropped = false;
-    disc bool destination_flag = false;
     disc bool collision = false;
     disc bool picked = false;
+    disc bool confirmation = false;
 
     location l0:
         initial; marked;
-        edge c_get_pickup_request do picked := true, destination_flag := false, validate_pickup := false ; //it is assumed that collision can be measured before starting the pickup procedure (lifting process)
-        edge c_drop_at_pickup  do picked := false, validate_drop := false, dropped := true;
-        edge c_validate_pickup  do validate_pickup := true;
-        edge c_validate_drop do validate_drop:= true, dropped := false;
-        edge u_rack_collision do collision := true;
-        edge u_rack_no_collision do collision := false;
-        edge u_confirmation when (validate_pickup = true or validate_drop = true)  do destination_flag := true; //confirmation for both validations
+        edge c_get_pickup_request  when (validate_pickup = true   and confirmation = true)  do picked := true,  validate_pickup := false , confirmation := false; //it is assumed that collision can be measured before starting the pickup procedure (lifting process)
+        edge c_drop_at_pickup      when (validate_drop   = true   and confirmation = true)  do picked := false, validate_drop := false, confirmation := false, dropped := true;
+        edge c_validate_pickup     when driving.loc = STORAGE do validate_pickup := true;
+        edge c_validate_drop       when driving.loc = PICKUP  do validate_drop:= true, dropped := false;
+        edge u_rack_collision      when driving.loc = STORAGE or driving.loc = PICKUP and collision = false do collision := true;
+        edge u_rack_no_collision   when driving.loc = STORAGE or driving.loc = PICKUP and collision = true  do collision := false;
+        edge u_confirmation        when (validate_pickup = true or validate_drop = true) do confirmation := true; //confirmation for both validations
 end
 
 /* REQUIREMENTS SECTION                                                                                 */
-/* All requirements below are expressed as invariant requirements. It could also be possible for        */
-/* Note: It is also possible to express requirements via requirement Automaton(s) to be defined.        */
+/* All requirements below are expressed as invariant requirements.                                      */
+/* Note: It is also possible to express requirements via requirement Automaton(s) if necessary .        */
 
 
 // Safe Movement (Requirements start with letter M)
 
 /* M1 REQUIREMENT: Special actions, like rotating, may only be performed when the vehicle is at a grid point as indicated by the location bar-codes.*/
-/*@Sukrut: What other special actions do we need to restrict? */
 /* INFORMAL STATEMENT: To prevent collisions and hardware integrity, a 90 degree rotation shall only be performed when the robot is not moving and a pickup request is in place.*/
 
 requirement invariant driving.c_rotate needs driving.moving = false and idle.message_accepted = true;
 
 
 /* M2 REQUIREMENT: The vehicle may not move when it is raising or lowering its lifting mechanism. */
-/*@Sukrut: Do we need to add something related to lifting? */
 /* INFORMAL STATEMENT: Upon reaching a storage location, the robot has to pickup the order before proceeding to delivery */
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_move;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_rotate;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_stop;
+requirement invariant (driving.loc = STORAGE or driving.loc = PICKUP) and destination.picked = false disables driving.c_move;
+requirement invariant (driving.loc = STORAGE or driving.loc = PICKUP) and destination.picked = false disables driving.c_move;
+requirement invariant (driving.loc = STORAGE or driving.loc = PICKUP) and destination.picked = false disables driving.c_move;
 
 /* M3 REQUIREMENT: The vehicle may not collide with other vehicles.  */
-/*@Sukrut: Current statement does not completely cover the requirement M3 */
 /* INFORMAL STATEMENT (non-functional): In order to break, the robot shall be moving.*/
 requirement invariant driving.c_stop needs driving.moving = true;
 
 /* M4 REQUIREMENT: If a product rack is lifted, it may not collide with other product racks.  */
 /* INFORMAL STATEMENT (non-functional): when lifted, control system avoids collision with other racks.*/
-requirement invariant destination.c_get_pickup_request needs destination.destination_flag = true and destination.picked = false and destination.dropped = false;
-requirement invariant destination.c_validate_pickup needs driving.reached = true and idle.message_accepted = true;
-requirement invariant destination.destination_flag = true disables destination.c_validate_pickup;
+requirement invariant destination.c_get_pickup_request needs destination.confirmation = true and destination.picked = false and destination.dropped = false;
+requirement invariant destination.c_validate_pickup needs driving.loc = STORAGE and idle.message_accepted = true;
+requirement invariant destination.confirmation = true disables destination.c_validate_pickup;
 requirement invariant destination.picked = true disables destination.c_validate_pickup;
 
-requirement invariant destination.destination_flag = true disables destination.c_validate_drop;
-requirement invariant destination.c_validate_drop needs driving.reached = true and destination.picked = true and idle.message_accepted = true;
-requirement invariant destination.c_drop_at_pickup needs driving.reached = true and destination.picked = true and destination.destination_flag = true;
+requirement invariant destination.confirmation = true disables destination.c_validate_drop;
+requirement invariant destination.c_validate_drop needs driving.loc = PICKUP and destination.picked = true and idle.message_accepted = true;
+requirement invariant destination.c_drop_at_pickup needs driving.loc = PICKUP and destination.picked = true and destination.confirmation = true;
+
+/* M4/M5 REQUIREMENT: When the proximity sensors are activated , the vehicle should stop immediately */
+requirement invariant driving.c_move needs driving.collision = false;
+requirement invariant driving.collision disables driving.c_move;
 
 /* M7 REQUIREMENT: After the battery is being recharged, the vehicle may only start moving again when the battery is fully charged.  */
 /* INFORMSL STATEMENT: In order to accept a command (within the charging station), battery shall be full */
 /* INFORMAL STATEMENT: In order to move, robot shall have full battery and a pickup request command accepted*/
 
-requirement invariant idle.c_accept_pickup_request needs charging_station.battery_full = true and charging_station.low_battery = false;
-requirement invariant driving.c_move needs charging_station.battery_full = true and idle.message_accepted = true; //Hiram: modify this condition to allow movement when low battery is on, go to charge should only be called once
+requirement invariant idle.c_accept_msg_request needs charging.battery_full = true and charging.low_battery = false;
+requirement invariant driving.c_move needs (charging.battery_full = true and idle.message_accepted = true) or (charging.low_battery = true and driving.goto_charge_req = true); //Hiram: modify this condition to allow movement when low battery is on, go to charge should only be called once
 
-requirement invariant driving.c_goto_charge needs charging_station.low_battery = true and driving.moving = false;
+requirement invariant driving.c_goto_charge needs charging.low_battery = true and driving.moving = false and driving.goto_charge_req = false;
 
-requirement invariant charging_station.low_battery = true disables destination.c_validate_pickup;
-requirement invariant charging_station.low_battery = true disables destination.c_validate_drop;
-
-
-// Path planning and execution (Requirements start with letter p)
+requirement invariant charging.low_battery = true disables destination.c_validate_pickup;
+requirement invariant charging.low_battery = true disables destination.c_validate_drop;
+requirement invariant driving.loc = CHARGING disables driving.c_move;
+requirement invariant driving.loc = CHARGING disables driving.c_rotate;
+requirement invariant driving.loc = CHARGING disables driving.c_goto_charge;
+// Path planning and execution (Requirements start with letter P)
 
 /* PATH PLANNING REQUIREMENTS ARE IMPLICIT AND CONSIDERED TO BE TAKEN CARE OF AT A LOWER LEVEL OF ABSTRACTION */
 
 // Location requests (Requirements start with letter L)
 
-/* L3 REQUIREMENT: A new destination may only be requested when it has reached its previous destination.  */
+/* L3 REQUIREMENT: A new destination may only be requested when it has loc its previous destination.  */
 /* INFORMAL STATEMENT: When a command message issuing a pickup request has been accepted, no other pickup request can be accepted until the current one is complete */
 /* INFORMAL STATEMENT: When the robot is driving, no pickup request command shall be processed*/
 /* INFORMAL STATEMENT (non-functional): When the robot is on the move, no further "move" commands shall be issued  */
 /* INFORMAL STATEMENT (non-functional): A robot cannot pickup an order while moving   */
 /* INFORMAL STATEMENT (non-functional): A robot cannot pickup an order while moving   */
-/* INFORMAL STATEMENT: In order to pickup an order (rack), the robot must have reached its destination. */
-/* INFORMAL STATEMENT (non-functional): To drop a package, the robots shall have reached its destination and cargo shall have been picked up first. */
+/* INFORMAL STATEMENT: In order to pickup an order (rack), the robot must have loc its destination. */
+/* INFORMAL STATEMENT (non-functional): To drop a package, the robots shall have loc its destination and cargo shall have been picked up first. */
 
-requirement invariant idle.message_accepted disables idle.c_accept_pickup_request;
-requirement invariant driving.moving = true disables idle.c_accept_pickup_request;
+requirement invariant idle.message_accepted disables idle.c_accept_msg_request;
+requirement invariant driving.moving = true disables idle.c_accept_msg_request;
 requirement invariant driving.moving = true disables driving.c_move;
 requirement invariant driving.moving = true disables destination.c_get_pickup_request;
 requirement invariant destination.picked = true disables destination.c_get_pickup_request;
-requirement invariant destination.c_get_pickup_request needs driving.reached = true and destination.collision = false;
-requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.reached = true;
+requirement invariant destination.c_get_pickup_request needs driving.loc = STORAGE and destination.collision = false;
+requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.loc = PICKUP and destination.collision = false;
 
 /* L5 and M5 REQUIREMENT: A battery location may only be requested when the battery is low.  */
 /* INFORMAL STATEMENT: When a command message low battery is accepted, disables new pickup requests */
 /* INFORMAL STATEMENT: When a command message low battery is accepted, disables moving */
 /* INFORMAL STATEMENT: During human intervention, do not move */
 /* INFORMAL STATEMENT: Human puts to charge */
+requirement invariant idle.c_request_human_assistance needs (charging.critical_battery = true and idle.request_assistance = false and charging.charging = false);
+requirement invariant charging.critical_battery = true disables idle.c_accept_msg_request;
+requirement invariant charging.critical_battery = true disables driving.c_move;
+requirement invariant charging.critical_battery = true disables driving.c_rotate;
 
-requirement invariant charging_station.low_bat_warning = true disables idle.c_accept_pickup_request;
-requirement invariant charging_station.low_bat_warning = true disables driving.c_move;
-requirement invariant charging_station.low_bat_warning = true disables charging_station.c_request_human_assistance;
-requirement invariant charging_station.c_request_human_assistance needs driving.moving = false;
-requirement invariant charging_station.take_to_charging_station=true disables charging_station.c_request_human_assistance;
+//requirement invariant charging.critical_battery = true disables idle.c_request_human_assistance;
+requirement invariant idle.c_request_human_assistance needs driving.moving = false;
 requirement invariant idle.c_complete_request needs destination.dropped = true;
 
