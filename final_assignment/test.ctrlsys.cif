@@ -1,122 +1,154 @@
-plant automaton charging_station:
-  uncontrollable u_full_battery;
-  uncontrollable u_empty_battery;
-  uncontrollable u_charging;
-  uncontrollable u_low_battery;
-  controllable c_request_human_assistance;
-  disc bool battery_full = false;
-  disc bool low_bat_warning = false;
-  disc bool battery_empty = false;
-  disc bool take_to_charging_station = false;
-  disc bool charging = false;
-  disc bool low_battery = false;
-  location l0:
-    initial;
-    marked;
-    edge c_request_human_assistance when battery_empty = true do low_bat_warning := true;
-    edge u_full_battery do battery_full := true, charging := false, battery_empty := false;
-    edge u_empty_battery when low_battery = false do battery_empty := true;
-    edge u_charging when take_to_charging_station = true do charging := true, battery_empty := false;
-    edge u_low_battery when battery_empty = false do low_battery := true;
-end
-plant automaton idle:
-  controllable c_accept_pickup_request;
-  controllable c_complete_request;
-  uncontrollable u_message_request;
-  disc bool message_accepted = false;
-  disc bool message_pending = false;
-  location l0:
-    initial;
-    marked;
-    edge u_message_request do message_pending := true;
-    edge c_accept_pickup_request when message_pending = true do message_accepted := true, message_pending := false;
-    edge c_complete_request when message_accepted = true do message_accepted := false;
-end
-plant automaton driving:
-  controllable c_move;
-  controllable c_rotate;
-  controllable c_stop;
-  controllable c_goto_charge;
-  uncontrollable u_arrive_to_destination;
-  disc bool moving = false;
-  disc bool reached = false;
-  location l0:
-    initial;
-    marked;
-    edge c_move do moving := true, reached := false;
-    edge c_rotate goto l0;
-    edge c_stop do moving := false;
-    edge u_arrive_to_destination do moving := false, reached := true;
-    edge c_goto_charge do moving := true;
-end
-plant automaton destination:
-  controllable c_get_pickup_request;
-  controllable c_drop_at_pickup;
-  controllable c_validate_pickup;
-  controllable c_validate_drop;
-  uncontrollable u_confirmation;
-  uncontrollable u_rack_collision;
-  uncontrollable u_rack_no_collision;
-  disc bool validate_pickup = false;
-  disc bool validate_drop = false;
-  disc bool dropped = false;
-  disc bool destination_flag = false;
-  disc bool collision = false;
-  disc bool picked = false;
-  location l0:
-    initial;
-    marked;
-    edge c_get_pickup_request do picked := true, destination_flag := false, validate_pickup := false;
-    edge c_drop_at_pickup do picked := false, validate_drop := false, dropped := true;
-    edge c_validate_pickup do validate_pickup := true;
-    edge c_validate_drop do validate_drop := true, dropped := false;
-    edge u_rack_collision do collision := true;
-    edge u_rack_no_collision do collision := false;
-    edge u_confirmation when validate_pickup = true or validate_drop = true do destination_flag := true;
+group robot_one:
+  enum Location = STORAGE, PICKUP, CHARGING, READY;
+  plant automaton charging:
+    uncontrollable u_full_battery;
+    uncontrollable u_empty_battery;
+    uncontrollable u_charging;
+    uncontrollable u_low_battery;
+    disc bool battery_full = true;
+    disc bool critical_battery = false;
+    disc bool charging = false;
+    disc bool low_battery = false;
+    location l0:
+      initial;
+      marked;
+      edge u_full_battery when battery_full = false and (low_battery = true and charging = true) do battery_full := true, charging := false, critical_battery := false, low_battery := false;
+      edge u_low_battery when low_battery = false and battery_full = true or charging = true and critical_battery = true do low_battery := true, battery_full := false, critical_battery := false;
+      edge u_empty_battery when critical_battery = false and low_battery = true and charging = false do critical_battery := true, low_battery := false;
+      edge u_charging when charging = false do charging := true;
+  end
+  plant automaton idle:
+    controllable c_complete_request;
+    controllable c_accept_msg_request;
+    controllable c_request_human_assistance;
+    uncontrollable u_message_request;
+    disc bool request_assistance = false;
+    disc bool message_accepted = false;
+    disc bool message_pending = false;
+    disc bool request_completed = false;
+    location l0:
+      initial;
+      marked;
+      edge u_message_request do message_pending := true;
+      edge c_request_human_assistance do request_assistance := true;
+      edge c_accept_msg_request when message_pending = true do message_accepted := true, message_pending := false, request_assistance := false, request_completed := false;
+      edge c_complete_request when message_accepted = true and request_completed = false do message_accepted := false, request_completed := true, request_assistance := false;
+  end
+  plant automaton driving:
+    controllable c_move;
+    controllable c_rotate;
+    controllable c_stop;
+    controllable c_goto_charge;
+    controllable c_ready;
+    controllable c_wait;
+    uncontrollable u_no_collision;
+    uncontrollable u_collision_detected;
+    uncontrollable u_arrive_to_storage;
+    uncontrollable u_arrive_to_pickup;
+    uncontrollable u_arrive_to_charge;
+    disc bool collision = false;
+    disc bool moving = false;
+    disc bool wait = false;
+    disc Location loc = READY;
+    disc bool goto_charge_req = false;
+    location l0:
+      initial;
+      marked;
+      edge c_rotate goto l0;
+      edge c_wait do wait := true;
+      edge c_ready when charging.battery_full = true and loc = CHARGING do loc := READY;
+      edge c_move do moving := true, wait := false;
+      edge c_stop do moving := false;
+      edge c_goto_charge do moving := true, goto_charge_req := true;
+      edge u_collision_detected when collision = false do collision := true, moving := false;
+      edge u_no_collision when collision = true do collision := false;
+      edge u_arrive_to_storage when idle.message_accepted = true and moving = true and destination.picked = false do moving := false, loc := STORAGE;
+      edge u_arrive_to_pickup when idle.message_accepted = true and moving = true and destination.picked = true do moving := false, loc := PICKUP;
+      edge u_arrive_to_charge when idle.message_accepted = false and goto_charge_req = true do moving := false, loc := CHARGING, goto_charge_req := false;
+  end
+  plant automaton destination:
+    controllable c_get_pickup_request;
+    controllable c_drop_at_pickup;
+    controllable c_validate_pickup;
+    controllable c_validate_drop;
+    uncontrollable u_confirmation;
+    uncontrollable u_rack_collision;
+    uncontrollable u_rack_no_collision;
+    disc bool validate_pickup = false;
+    disc bool validate_drop = false;
+    disc bool dropped = false;
+    disc bool collision = false;
+    disc bool picked = false;
+    disc bool confirmation = false;
+    location l0:
+      initial;
+      marked;
+      edge c_get_pickup_request when validate_pickup = true and confirmation = true do picked := true, validate_pickup := false, confirmation := false;
+      edge c_drop_at_pickup when validate_drop = true and confirmation = true do picked := false, validate_drop := false, confirmation := false, dropped := true;
+      edge c_validate_pickup when driving.loc = STORAGE do validate_pickup := true, dropped := false;
+      edge c_validate_drop when driving.loc = PICKUP do validate_drop := true;
+      edge u_rack_collision when collision = false do collision := true;
+      edge u_rack_no_collision when collision = true do collision := false;
+      edge u_confirmation when validate_pickup = true or validate_drop = true do confirmation := true;
+  end
 end
 supervisor automaton sup:
-  alphabet charging_station.c_request_human_assistance, idle.c_accept_pickup_request, idle.c_complete_request, driving.c_move, driving.c_rotate, driving.c_stop, driving.c_goto_charge, destination.c_get_pickup_request, destination.c_drop_at_pickup, destination.c_validate_pickup, destination.c_validate_drop;
+  alphabet robot_one.idle.c_request_human_assistance, robot_one.idle.c_accept_msg_request, robot_one.idle.c_complete_request, robot_one.driving.c_rotate, robot_one.driving.c_wait, robot_one.driving.c_ready, robot_one.driving.c_move, robot_one.driving.c_stop, robot_one.driving.c_goto_charge, robot_one.destination.c_get_pickup_request, robot_one.destination.c_drop_at_pickup, robot_one.destination.c_validate_pickup, robot_one.destination.c_validate_drop;
   location:
     initial;
     marked;
-    edge charging_station.c_request_human_assistance when true;
-    edge destination.c_drop_at_pickup when true;
-    edge destination.c_get_pickup_request when true;
-    edge destination.c_validate_drop when true;
-    edge destination.c_validate_pickup when true;
-    edge driving.c_goto_charge when true;
-    edge driving.c_move when true;
-    edge driving.c_rotate when true;
-    edge driving.c_stop when true;
-    edge idle.c_accept_pickup_request when true;
-    edge idle.c_complete_request when true;
+    edge robot_one.destination.c_drop_at_pickup when true;
+    edge robot_one.destination.c_get_pickup_request when true;
+    edge robot_one.destination.c_validate_drop when true;
+    edge robot_one.destination.c_validate_pickup when true;
+    edge robot_one.driving.c_goto_charge when true;
+    edge robot_one.driving.c_move when true;
+    edge robot_one.driving.c_ready when true;
+    edge robot_one.driving.c_rotate when true;
+    edge robot_one.driving.c_stop when true;
+    edge robot_one.driving.c_wait when true;
+    edge robot_one.idle.c_accept_msg_request when true;
+    edge robot_one.idle.c_complete_request when true;
+    edge robot_one.idle.c_request_human_assistance when true;
 end
-requirement invariant driving.c_rotate needs driving.moving = false and idle.message_accepted = true;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_move;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_rotate;
-requirement invariant driving.reached = true and destination.picked = false disables driving.c_stop;
-requirement invariant driving.c_stop needs driving.moving = true;
-requirement invariant destination.c_get_pickup_request needs destination.destination_flag = true and destination.picked = false and destination.dropped = false;
-requirement invariant destination.c_validate_pickup needs driving.reached = true;
-requirement invariant destination.destination_flag = true disables destination.c_validate_pickup;
-requirement invariant destination.picked = true disables destination.c_validate_pickup;
-requirement invariant destination.destination_flag = true disables destination.c_validate_drop;
-requirement invariant destination.c_validate_drop needs driving.reached = true and destination.picked = true;
-requirement invariant destination.c_drop_at_pickup needs driving.reached = true and destination.picked = true and destination.destination_flag = true;
-requirement invariant idle.c_accept_pickup_request needs charging_station.battery_full = true;
-requirement invariant driving.c_move needs charging_station.battery_full = true and idle.message_accepted = true;
-requirement invariant idle.c_accept_pickup_request needs charging_station.low_battery = false;
-requirement invariant driving.c_goto_charge needs charging_station.low_battery = true and driving.moving = false;
-requirement invariant idle.message_accepted disables idle.c_accept_pickup_request;
-requirement invariant driving.moving = true disables idle.c_accept_pickup_request;
-requirement invariant driving.moving = true disables driving.c_move;
-requirement invariant driving.moving = true disables destination.c_get_pickup_request;
-requirement invariant destination.picked = true disables destination.c_get_pickup_request;
-requirement invariant destination.c_get_pickup_request needs driving.reached = true and destination.collision = false;
-requirement invariant destination.c_drop_at_pickup needs destination.picked = true and driving.reached = true;
-requirement invariant charging_station.low_bat_warning = true disables idle.c_accept_pickup_request;
-requirement invariant charging_station.low_bat_warning = true disables driving.c_move;
-requirement invariant charging_station.low_bat_warning = true disables charging_station.c_request_human_assistance;
-requirement invariant charging_station.c_request_human_assistance needs driving.moving = false;
-requirement invariant charging_station.take_to_charging_station = true disables charging_station.c_request_human_assistance;
-requirement invariant idle.c_complete_request needs destination.dropped = true;
+requirement invariant robot_one.driving.loc = robot_one.STORAGE and robot_one.destination.picked = false disables robot_one.driving.c_move;
+requirement invariant robot_one.driving.loc = robot_one.STORAGE and robot_one.destination.picked = false disables robot_one.driving.c_rotate;
+requirement invariant robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.picked = true disables robot_one.driving.c_move;
+requirement invariant robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.picked = true disables robot_one.driving.c_rotate;
+requirement invariant robot_one.driving.c_stop needs robot_one.driving.moving = true;
+requirement invariant robot_one.driving.c_rotate needs robot_one.driving.moving = false and robot_one.idle.message_accepted = true;
+requirement invariant robot_one.destination.collision disables robot_one.driving.c_move;
+requirement invariant robot_one.destination.collision disables robot_one.driving.c_rotate;
+requirement invariant robot_one.destination.c_get_pickup_request needs robot_one.destination.confirmation = true and robot_one.destination.picked = false and robot_one.destination.dropped = false;
+requirement invariant robot_one.destination.c_validate_pickup needs robot_one.driving.loc = robot_one.STORAGE and robot_one.idle.message_accepted = true;
+requirement invariant robot_one.destination.confirmation = true disables robot_one.destination.c_validate_pickup;
+requirement invariant robot_one.destination.picked = true disables robot_one.destination.c_validate_pickup;
+requirement invariant robot_one.destination.confirmation = true disables robot_one.destination.c_validate_drop;
+requirement invariant robot_one.destination.c_validate_drop needs robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.picked = true and robot_one.idle.message_accepted = true;
+requirement invariant robot_one.destination.c_drop_at_pickup needs robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.picked = true and robot_one.destination.confirmation = true;
+requirement invariant robot_one.driving.c_move needs robot_one.driving.collision = false;
+requirement invariant robot_one.driving.collision disables robot_one.driving.c_move;
+requirement invariant robot_one.driving.collision disables robot_one.driving.c_rotate;
+requirement invariant robot_one.charging.critical_battery = true disables robot_one.idle.c_accept_msg_request;
+requirement invariant robot_one.charging.critical_battery = true disables robot_one.driving.c_move;
+requirement invariant robot_one.charging.critical_battery = true disables robot_one.driving.c_rotate;
+requirement invariant robot_one.idle.c_request_human_assistance needs robot_one.charging.critical_battery = true and robot_one.charging.charging = false or robot_one.driving.wait = true and robot_one.driving.collision = true;
+requirement invariant robot_one.idle.c_accept_msg_request needs robot_one.charging.battery_full = true and robot_one.charging.low_battery = false;
+requirement invariant robot_one.driving.c_move needs robot_one.charging.battery_full = true and robot_one.idle.message_accepted = true or robot_one.charging.low_battery = true and robot_one.driving.goto_charge_req = true;
+requirement invariant robot_one.driving.c_goto_charge needs robot_one.charging.low_battery = true and robot_one.driving.moving = false and robot_one.driving.goto_charge_req = false;
+requirement invariant robot_one.charging.low_battery = true disables robot_one.destination.c_validate_pickup;
+requirement invariant robot_one.charging.low_battery = true disables robot_one.destination.c_validate_drop;
+requirement invariant robot_one.driving.loc = robot_one.CHARGING disables robot_one.driving.c_move;
+requirement invariant robot_one.driving.loc = robot_one.CHARGING disables robot_one.driving.c_rotate;
+requirement invariant robot_one.driving.loc = robot_one.CHARGING disables robot_one.driving.c_goto_charge;
+requirement invariant robot_one.idle.message_accepted disables robot_one.idle.c_accept_msg_request;
+requirement invariant robot_one.driving.moving = true disables robot_one.idle.c_accept_msg_request;
+requirement invariant robot_one.driving.moving = true disables robot_one.driving.c_move;
+requirement invariant robot_one.driving.moving = true disables robot_one.destination.c_get_pickup_request;
+requirement invariant robot_one.destination.picked = true disables robot_one.destination.c_get_pickup_request;
+requirement invariant robot_one.destination.c_get_pickup_request needs robot_one.driving.loc = robot_one.STORAGE and robot_one.destination.collision = false;
+requirement invariant robot_one.destination.c_drop_at_pickup needs robot_one.destination.picked = true and robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.collision = false;
+requirement invariant robot_one.driving.c_wait needs robot_one.driving.collision = true;
+requirement invariant robot_one.driving.wait = true disables robot_one.driving.c_wait;
+requirement invariant robot_one.idle.c_request_human_assistance needs robot_one.driving.moving = false;
+requirement invariant robot_one.idle.c_complete_request needs robot_one.driving.moving = false and robot_one.destination.dropped = true and robot_one.driving.loc = robot_one.PICKUP;
