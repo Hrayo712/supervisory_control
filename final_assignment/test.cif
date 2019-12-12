@@ -10,7 +10,7 @@
 
   @Sukrut(05_12_2019): Added Critical/ empty states for the battery  and Added variable Charging in "plant charging_station" - Requirement L5
 
-  @HIRAM (12_12_2019) : Completed the uncontrollable "charging" model. Modified the Driving and destination plant to better reflect the uncontrollable plant.
+  @Koen (12_12_2019) : Completed the uncontrollable "charging" model. Modified the Driving and destination plant to better reflect the uncontrollable plant.
              Made modifications to support M4/M5/L5 requirements. */
 
 /* Robot group */
