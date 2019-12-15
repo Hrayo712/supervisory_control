@@ -10,7 +10,7 @@
 
   @Sukrut(05_12_2019): Added Critical/ empty states for the battery  and Added variable Charging in "plant charging_station" - Requirement L5
 
-  @Koen (12_12_2019) : Completed the uncontrollable "charging" model. Modified the Driving and destination plant to better reflect the uncontrollable plant.
+  @HIRAM (12_12_2019) : Completed the uncontrollable "charging" model. Modified the Driving and destination plant to better reflect the uncontrollable plant.
              Made modifications to support M4/M5/L5 requirements. */
 
 /* Robot group */
@@ -30,7 +30,7 @@ group def robot():
         location l0:
             initial; marked;
             edge u_full_battery   when (battery_full = false and (low_battery = true and charging = true))   do battery_full:= true, charging:= false, critical_battery:=false, low_battery := false;
-            edge u_low_battery    when ((low_battery = false and battery_full = true) or (charging = true and critical_battery = true )) do low_battery := true, battery_full := false, critical_battery:=false;
+            edge u_low_battery    when ((low_battery = false and battery_full = true and charging = false) or (charging = true and critical_battery = true )) do low_battery := true, battery_full := false, critical_battery:=false;
             edge u_empty_battery  when (critical_battery = false and low_battery = true and charging = false) do critical_battery:= true, low_battery := false;
             edge u_charging       when ((charging = false))                              do charging:=true ;
     end
@@ -87,7 +87,7 @@ group def robot():
             edge c_move                 do moving := true, wait:=false;
             edge c_stop                 do moving := false;
             edge c_goto_charge          do moving := true, goto_charge_req := true;
-            edge u_collision_detected   when collision = false  do collision :=true, moving:=false;
+            edge u_collision_detected   when collision = false  do collision :=true;
             edge u_no_collision         when collision = true   do collision:= false;
             edge u_arrive_to_storage    when idle.message_accepted = true and moving = true and destination.picked = false do moving := false, loc:= STORAGE;
             edge u_arrive_to_pickup     when idle.message_accepted = true and moving = true and destination.picked = true  do moving := false, loc:= PICKUP;
@@ -142,10 +142,11 @@ requirement invariant robot_one.driving.loc = robot_one.PICKUP and robot_one.des
 requirement invariant robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.picked = true disables robot_one.driving.c_rotate;
 
 /* M3 REQUIREMENT: The vehicle may not collide with other vehicles.  */
-requirement invariant robot_one.driving.c_stop needs robot_one.driving.moving = true;
+requirement invariant robot_one.driving.c_stop needs robot_one.driving.moving = true and robot_one.driving.collision = true;
 requirement invariant robot_one.driving.c_rotate needs robot_one.driving.moving = false and robot_one.idle.message_accepted = true;
 requirement invariant robot_one.destination.collision disables robot_one.driving.c_move;
 requirement invariant robot_one.destination.collision disables robot_one.driving.c_rotate;
+
 
 /* M4 REQUIREMENT: If a product rack is lifted, it may not collide with other product racks.  */
 requirement invariant robot_one.destination.c_get_pickup_request needs robot_one.destination.confirmation = true and robot_one.destination.picked = false and robot_one.destination.dropped = false;
@@ -156,8 +157,6 @@ requirement invariant robot_one.destination.picked = true disables robot_one.des
 requirement invariant robot_one.destination.confirmation = true disables robot_one.destination.c_validate_drop;
 requirement invariant robot_one.destination.c_validate_drop needs robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.picked = true and robot_one.idle.message_accepted = true;
 requirement invariant robot_one.destination.c_drop_at_pickup needs robot_one.driving.loc = robot_one.PICKUP and robot_one.destination.picked = true and robot_one.destination.confirmation = true;
-
-
 
 /* M4/M5 REQUIREMENT: When the proximity sensors are activated , the vehicle should stop immediately */
 requirement invariant robot_one.driving.c_move needs robot_one.driving.collision = false;
@@ -185,7 +184,6 @@ requirement invariant robot_one.driving.loc = robot_one.CHARGING disables robot_
 
 /* Path planning and execution (Requirements start with letter P) */
 
-
 /* Location requests (Requirements start with letter L) */
 
 /* L3 REQUIREMENT: A new destination may only be requested when it has reached its previous destination.  */
@@ -203,7 +201,7 @@ requirement invariant robot_one.destination.c_drop_at_pickup needs robot_one.des
 
 /* L5 REQUIREMENT: A battery location may only be requested when the battery is low.  */
 
-requirement invariant robot_one.driving.c_wait needs robot_one.driving.collision = true;
+requirement invariant robot_one.driving.c_wait needs robot_one.driving.collision = true and robot_one.driving.moving = false;
 requirement invariant robot_one.driving.wait = true disables robot_one.driving.c_wait;
 requirement invariant robot_one.idle.c_request_human_assistance needs robot_one.driving.moving = false;
 requirement invariant robot_one.idle.c_complete_request needs robot_one.driving.moving = false and robot_one.destination.dropped = true and robot_one.driving.loc = robot_one.PICKUP;
